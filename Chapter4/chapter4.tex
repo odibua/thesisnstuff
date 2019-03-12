@@ -1,0 +1,362 @@
+%!TEX root = ../thesis.tex
+%*******************************************************************************
+%****************************** Third Chapter **********************************
+%*******************************************************************************
+\chapter{Validating Reduced Order Models}
+
+\ifpdf
+    \graphicspath{{Chapter4/Figs/Raster/}{Chapter4/Figs/PDF/}{Chapter4/Figs/}}
+\else
+    \graphicspath{{Chapter4/Figs/Vector/}{Chapter4/Figs/}}
+\fi
+
+\section{Summary}
+This chapter focuses on validating the hierarchy of models developed in Chapter 3. In the context of this work, model validation is the process of both estimating the parameters of models in such a way that they simultaneously minimize the difference between these models and experimental data, and give reasonable uncertainty in the model output and estimated parameters.
+
+The chapter begins with a formulation of parameter estimation as a nonlinear optimization problem, followed by a discussion of different methods of optimization, with an emphasis on Particle Swarm Optimization (PSO), a review of challenges in optimization, and a discussion about how uncertainty of parameters can be quantified through confidence regions. We wrap up the algorithmic component of our discussion by presenting a novel optimization framework that is used to simultaneously validate models, establish confidence in our results, and determine the number of experiments needed to yield a user-defined balance of fitting models with a high degree of accuracy, and giving a meaningful distribution of estimated parameters and model outputs. Subsequently, we present a two part discussion on the results of our novel algorithm when applied to our reduced comb-drive actuator in electrolyte models, and the accompanying experiments. The first part of the discussion, focuses on observing the results of our algorithm in the scenario where we are concerned only with determining which of the reduced models fit the data with the greatest degree of fidelity. In this part of the discussion, we make use of all our experiments, and comment on the simplest model that best fits the data. The second part of our discussion examines the results of our algorithm more holistically. Here, we observe the confidence regions found by our algorithms when applied to different reduced order models, at different numbers of experiments and measurements. We then comment on how the confidence regions, as well as the distribution of model outputs, change for each model as a function of the amount of data used in the fit, and at a particular confidence, $1-\alpha$. Finally, we discuss how we can use the in-depth results of our algorithm to select the correct combination of reduced order models, and amount of data that allows us to explain the behavior of the comb-drive actuator with some balance of fit to data, and an appropriate distributions of model outputs and estimated parameters. 
+
+\section{Parameter Estimation as an Optimization Problem}
+The problem of estimating the parameters of a model that best fits the data can be represented as the following nonlinear optimization problem
+
+\begin{equation} \label{orig_optim_problm}
+\begin{aligned}
+& \underset{x}{\text{minimize}}
+& & y(\mathbf{x},\mathbf{z}) = y(\mathbf{x}) = ||\mathbf{f}(\mathbf{x},\mathbf{z}) - \mathbf{g}(\mathbf{z})||_p \\
+& \text{subject to}
+& & x_{i,min} \leq x_i \leq x_{i,max} , \; i = 1, \ldots, m.
+\end{aligned}
+\end{equation}
+
+where $\mathbf{x}$ is the vector of tune-able parameters that the model takes as in input, $\mathbf{z}$ is the vector of inputs to the model that are not tune-able, $\mathbf{f}$ is the vector of values that are output by the model given a particular set of $\mathbf{x}$ and $\mathbf{z}$, $\mathbf{g}$ is the vector of values that are output given $\mathbf{z}$, $p$ is an integer that indicates the type of norm we are taking (eg. $p=1 \implies \textrm{ L1 norm}$), $x_i$ is the $i_{th}$ component of the vector $\mathbf{x}$, and $m$ is the number of components in that vector. This is a standard bounded nonlinear optimization problem. In our case, we bound the parameters of the model, $\mathbf{x}$, so that our optimization framework only selects physically realizable values, and we select $p=2$ so that the above objective function becomes L2 (least-squares).
+
+\section{Optimization Techniques}
+This section focuses on reviewing different optimization techniques. We discuss gradient methods, with a focus on the trust region reflective algorithm, and stochastic methods, with a focus on particle swarm optimisation. 
+
+\subsection{Gradient Methods}
+
+Gradient methods for optimization are among the most popular in literature. These methods use the gradients, or approximate gradients, of functions with respect to their tuneable inputs in order to find the value of these inputs that minimize or maximize said function. The most common gradient optimization method is gradient descent, which has gained particular favor in the machine learning community \textbf{CITE NG}. Given the optimization problem, \ref{orig_optim_problm}, and neglecting the constraints, gradient descent involves making an initial guess at the solution, $\mathbf{x}^{0}$, and iterating on that guess using,
+
+\begin{equation} \label{grad_descent}
+    \mathbf{x}^{n+1} = \mathbf{x}^{n} - \alpha g, \quad g = \nabla_\mathbf{x} y(\mathbf{x}^{n},\mathbf{z})
+\end{equation}
+where $\alpha$ is the learning rate, $x^{n}$ is the guess of the solution at the $nth$ iteration of gradient descent, $x^{n+1}$ is the guess at the $(n+1)th$ iteration based on the gradient of the objective function, and $\nabla_\mathbf{x} y(\mathbf{x}^{n},\mathbf{z})$ is the numeric or analytic gradient of $y$ with respect $\mathbf{x}$, evaluated at $\mathbf{x}^{n}$. While gradient descent is a powerful optimization method, it can be very expensive, especially when optimizing a nonlinear function. In particular, while the gradient moves in the direction of greatest change in the function, it does so at an arbitrary distance, making it more prone to "overreacting" to local curvature in a nonlinear function \textbf{illustration of this}.
+
+In order to address this issue, a class of gradient based methods, termed Trust Region, methods were developed. These optimization methods in particular involve first determining the maximum magnitude, $\delta$, of change that can be imposed on the current guess of the solution. The size of $\delta$ is determined primarily by the extent to which the objective function being minimized reduces in the region around the current guess of a solution. There are a variety of algorithms for implementing this class of algorithms, the details of which are illustrated by Yuan et al., \textbf{CITE TRUST REGION}. To end our discussion on gradient methods, we will outline the general trust region problem.
+
+The first step of the Trust-Region algorithm is making a local quadratic approximation of the objective function.
+
+\begin{equation} \label{quad_approx}
+    \tilde{y}(\mathbf{x}+\delta,\mathbf{z}) = y(\mathbf{x},\mathbf{z}) + g^T \delta + \delta^T B \delta 
+\end{equation}
+where g is as defined in \ref{grad_descent}, $\delta$ is some perturbation to $\mathbf{x}$, and $B$ is an approximation of the hessian of the objective function.\textbf{CITE TRUST REGION} If Like gradient descent, the Trust Region Algorithm is iterative. It selects a vector step by which to change $\mathbf{x}^n$ by using \ref{quad_approx} to solve the following constrained optimization problem,
+
+\begin{equation} \label{trust_region_optim_problm}
+\begin{aligned}
+& \underset{\delta}{\text{minimize}}
+& & y_n(\mathbf{x}^n,\mathbf{z}) + g_n^T \delta + \delta^T B_n \delta\\
+& \text{such that}
+& & ||\delta||_2 \leq \Delta_n.
+\end{aligned}
+\end{equation}
+
+where $g_n$ is the gradient of the objective function evaluated at $\mathbf{x}^n$, $B_n$ is the approximation of the Hessian at the $\mathbf{x}^n$, and $\Delta_n$ is the trust region at iteration $n$. The size of $\Delta_n$ is determined by the extent to which the objective function, $y$, can be minimized within this region. If on the previous iteration, $n-1$, the objective function is sufficiently reduced, then the trust region generally expands. If not, it reduces. Since we simply use a Python implementation of the Trust Region Algorithm, we do not go into specifics. Details on a variety of Trust Region Algorithms can be found in Yuan et al, \textbf{CITE TRUST REGION}.  
+
+\subsection{Stochastic Optimization Methods: Particle Swarm Optimization (PSO)}
+Gradient based methods have two main limitations. The first is that they require the calculation of gradients, which can be expensive, and the second is that they are prone to local minima when given poor initial conditions. Stochastic optimization methods attempts to address both of these issues. Rather than taking gradients, stochastic optimization methods randomly search the solution space in order to minimize an objective function. Some of these algorithms have heuristically been shown to be more efficient at finding the global minimum of an objective function, \textbf{CITE PSO Thesis}. The stochastic optimization method of interest to us is Particle Swarm Optimization (PSO). In this section we will review PSO, and its key variants.  
+
+The basic version of PSO was developed by Kennedy et al. \textbf{Cite Basic PSO Paper}. In this version of PSO, the user initializes a "swarm" of $m$ guesses at an optimal solution, $(\mathbf{x}_1,...,\mathbf{x}_m)$, and evaluates the function at each of these guesses. The guess that results in the most optimal function, $\mathbf{x}_{Best}$, is stored. Each guess is called a particle, and the best solution each particle has ever seen during the optimization process is stored as $\mathbf{x}_{i,Best}$. During an iteration of particle swarm optimization, each particle's velocity is updated as 
+
+\begin{equation} \label{pso_vel}
+    \begin{aligned}
+    v_{i,j}(k+1) &= w v_{i,j}(k) + c_1 r_{1,j}((\mathbf{x}_{i,Best}(k))_j - x_{i,j}(k)) + c_2 r_{2,j} ((\mathbf{x}_{Best}(k))_{i,j} - x_{i,j}(k)), \\ 
+    &i=1,...,m \quad j=1,...,n
+    \end{aligned}
+\end{equation}
+where $v_{i,j}(k)$ is the velocity of the $j^{th}$ dimension of the $i^{th}$ particle at iteration $k$, $w$ is an inertial weight that states the extent to which the current velocity should impact the subsequent one, $c_1$ is a user determined constant, and $r_{1,j}$ and $r_{2,j}$ are random variables distributed uniformly in the interval $[0,1]$, i.e $r_1 \sim U(0,1)$ and $r_2 \sim U(0,1)$. This velocity equation is then used to update each solution guess (particle), as
+
+\begin{equation} \label{pso_pos}
+    x_{i,j}(k+1) = x_{i,j}(k) + \mathbf{x}_{i,j}(k)
+\end{equation}
+Algorithm \ref{pso_algorithm} sketches out the PSO in detail, assuming that the goal is to minimize some objective function $f$. A couple of things should be clarified from the algorithm sketch. Three of these clarifications involve the position and velocity of each particle. First, it is standard to guess the initial particles by sampling a multivariate uniform distribution in the domain defined by $\mathbf{x}_{max}$ and $\mathbf{x}_{min}$. Second, a maximum, $\mathbf{v}_{max}$, and minimum, $\mathbf{v}_{min}$, speed, is used to bound the velocity of each particle at each iteration of PSO. This is in order to help keep the particle dynamics stable, a point that will be expounded on shortly. Third, the re-initialization of particles that move outside of the solution domain is not well part of the original PSO algorithm. However, we added this in order to help insure that most of the particles remained within the defined solution domain.
+
+The next set of points that need to be expanded upon are the values of user defined hyper-parameters, $c_1$, $c_2$, and $w$. These parameters control the relative impact of a particle's personal best solution, the best solution in the swarm, and the particle's own previous velocity on it's subsequent movement in solution space. There a variety of methods for determining the value of the inertial weights during optimization, including the strategy of decreasing the weight linearly as a function of iteration, \textbf{Cite Shi and Ebehart Emprical Study}. However, Shi et al. found that selecting values of inertial weight that satisfies $0.9 \leq w \leq 1.2$ tends to enhance the ability of PSO to converge globally \textbf{Cite Shi and Ebehart Modified PSO}. Additionally, it was found that choosing values of $c_1 \textrm{ and } c_2$ to satisfy $0 \leq c_1, c_2 \leq 2.0$ allows for the PSO performance. The values of these hyper-parameters are summarized in Table \ref{pso_hyperparam_vals}. 
+
+\begin{breakablealgorithm}
+\caption{PSO}\label{pso_algorithm}
+\begin{algorithmic}[1]
+\State Define $n_{max}$ \Comment{Maximum iterations of NP-PSO}
+\State Define $n_{samples}$ \Comment{Maximum iterations of sampling particles}
+\State Initialize $tol$  \Comment{Minimum change in best solution}
+\EndProcedure
+
+\Procedure{Initialize Particle Positions and Velocities}{}
+\State Define maximum and minimum allowed velocities and positions, $\mathbf{v}_{max}$, $\mathbf{v}_{min}$, $\mathbf{x}_{max}$ and $\mathbf{x}_{min}$
+\State Randomly initialize solutions, $\mathbf{x}_i \quad i=1...m$ in the domain bounded by $\mathbf{x}_{max}$ and $\mathbf{x}_{min}$
+\State Randomly initialize velocities, $\mathbf{v}_i \quad i=1...m$ to zero or in the domain bounded by $\mathbf{v}_{max}$ and $\mathbf{v}_{min}$
+\EndProcedure
+
+\Procedure{Initialize Best Particles}{}
+\State $\mathbf{x}_{Best} \leftarrow \underset{\mathbf{x}_i}{\textrm{min}}(y(\mathbf{x}_1)...y(\mathby{x}_m))$
+\For{$\mathbf{x}_i$ in $[\mathbf{x}_1,....\mathbf{x}_m]$}
+    \State $x_{i,Best} \leftarrow \mathbf{x}_i$
+\EndFor
+\EndProcedure
+
+\Procedure{Run PSO}{}
+\State $k \leftarrow 0$
+\While{$k<=n_{max} \text{ or } f_{Best}>tol$}
+    \State Update each particle velocity using \ref{pso_vel}
+    \If {$v_{i,j}(k+1) > \mathbf{v}_{max}_{i,j}$ or $v_{i,j}(k+1) < \mathbf{v}_{min}_{i,j}$}
+    \State $v(k+1)_{i,j} = \textrm{max}(\textrm{min}(v(k+1)_{i,j},\mathbf{v}_{max}_{i,j}),\mathbf{v}_{min}_{i,j})$
+    \EndIf
+    \State Update each particle position using \ref{pso_pos}
+    \If {$x_{i,j}(k+1) > \mathbf{x}_{max}_{i,j}$ or $x_{i,j}(k+1) < \mathbf{x}_{min}_{i,j}$}
+    \State Randomly reinitialize particle $i$ in the domain bounded by 
+    \EndIf
+    \For{$\mathbf{x}_i$ in $[\mathbf{x}_1,....\mathbf{x}_m]$}
+        \If {$y(\mathbf{x}_i) < y_{i,Best}$ }
+            \State $\mathbf{x}_{i,Best} = \mathbf{x}_i$
+        \EndIf
+        \If {$y(\mathbf{x}_i) < y_{Best}$ }
+            \State $\mathbf{x}_{Best} = \mathbf{x}_i$
+        \EndIf
+    \EndFor
+    $k \leftarrow k+1$
+\EndWhile
+\EndProcedure
+\end{algorithmic}
+\end{breakablealgorithm}
+
+The initial PSO algorithm was promising, and has found applications ranging from tuning the hyper-parameters of neural networks, \textbf{DNN PSO Paper}, to estimating the value of circuit elements in PV Cells, \textbf{Cite PV Cells Paper}. Despite the promise of PSO, it has multiple issues. The first is that it is prone to premature convergence to local minima, and the second is that the dynamics of some particles tend toward instability \textbf{PSO Thesis}. More specifically, their velocities can grow exponentially, causing these particles to quickly move away from their defined solution domain. Multiple variants of PSO have been proposed to address these issues. In this work, we focus on the constricted PSO \textbf{Constriction PSO Paper}, and the Nonparametric PSO (NPSO) \textbf{NPSO Paper}.
+
+\begin{table}[!htb]
+\begin{center}
+{\begin{tabular}{|c|c|}
+	\hline
+	\textbf{PSO Hyper-parameters} & \textbf{Recommended Range of Values} \\
+    \hline
+    $w$ & $0.9 \leq w \leq 1.2$ \\
+    \hline
+    $c_1$  & $0 \leq c_1 \leq 2.0$ \\
+    \hline
+    $c_2$  & $0 \leq c_2 \leq 2.0$ \\
+    \hline  
+\end{tabular}}
+\caption{Typical range of Hyper-parameters of the PSO algorithm found in literature}\label{pso_hyperparam_vals}
+\end{center}
+\end{table}
+
+
+\subsection{Stochastic Optimization: Nonparametric Particle Swarm Optimization and Constricted PSO}
+In this subsection we review the constricted PSO, and the NPSO optimization algorithms mentioned above. The constricted PSO was derived through Clerc et al.'s study of the stability of the PSO algorithm, \textbf{Cite Clerc et al}, assuming a function with a scalar solution, $x^*$. Before summarizing the work of Clerc et al, we introduce a few key expressions. The first is a combination of $x$ and $x_{Best}$,
+\begin{equation} \label{combined_point}
+    p = \frac{\phi_1 x + \phi_2 x_{Best}}{\phi} \quad \phi = \phi_1 + \phi_2
+\end{equation}
+where $\phi_1 = r_1 c_1$ and $\phi_2 = r_2 c_2$, which are both random quantities. However, for the purpose of the stability analysis, $\phi_1$ and $\phi_2$ are taken to be fixed quantities. Using this, Clerc et al. wrote a system of equations for the trajectories of the PSO particle as \textbf{Cite PSO Thesis}
+
+\begin{equation} \label{continous_pso_states_clerc}
+    \begin{aligned}
+        v(k+1) &= v(k) + \phi (p-x(k)) \\
+        x(k+1) &= x(k) + v(k+1) 
+    \end{aligned}
+\end{equation}
+
+This system is subsequently transformed to a discrete time dynamic system, 
+\begin{equation} \label{discrete_pso_states_clerc}
+   \begin{aligned}
+    v_{k+1} &= v_k + \phi z_k  \\
+    z_{k+1} &= -v_{k} + (1-\phi)z_{k} 
+    \end{aligned} 
+\end{equation}
+where $z_k = p - x_k$. Clerc et al. were able to show that the behavior of this system is governed by two eigenvalues, $\lambda_1$ and $\lambda_2$, where the system is guaranteed to converge when $max(|\lambda_1|,|\lambda_2|) < 1$. Clerc et al. wanted to be able to explicitly control this rate of convergence, so they further transformed the system into one in which the eigenvalues can be written as $\lambda_1' = \chi_1 \lambda_1$ and $\lambda_2' = \chi_2 \lambda_2$ with tune-able
+coefficients, $\beta, \gamma, \delta, \eta, \textrm{ and } \alpha$.
+\begin{equation} \label{discrete_controllable_pso_states_clerc}
+   \begin{aligned}
+    v_{k+1} &= \alpha v_k + \beta \phi z_k  \\
+    z_{k+1} &= -\gamma v_{k} + (\delta- \eta \phi)z_{k} 
+    \end{aligned} 
+\end{equation}
+Different choices of the above control parameters result in the system defined by \ref{discrete_controllable_pso_states_clerc} converging. Clerc et al. generalized the results of analyzing this system to the original Particle Swarm Optimization equations, \ref{pso_vel} and \ref{pso_pos}, in order to obtain a constricted velocity update equation,
+\begin{equation} \label{pso_vel_constrict}
+    \begin{aligned}
+    v_{i,j}(k+1) &= \chi (v_{i,j}(k) + c_1 r_{1,j}((\mathbf{x}_{i,Best}(k))_j - x_{i,j}(k)) + c_2 r_{2,j} ((\mathbf{x}_{Best}(k))_{i,j} - x_{i,j}(k))), \\ 
+    &i=1,...,m \quad j=1,...,n
+    \end{aligned}
+\end{equation}
+
+where $\chi$ satisfies
+\begin{equation}
+    \chi = \frac{2}{|2 - \psi \sqrt{\psi^2 - 4\psi}|}, \quad \psi = c_1 + c_2
+\end{equation}
+and $c_1=c_2=4.05$. With this update equation, it is no longer necessary to bound the maximum and minimum velocity as in the original PSO algorithm, \ref{pso_algorithm}. Thus, the constriction PSO is simply algorithm  algorithm \ref{pso_algorithm}, where the velocity update equation is now governed by \ref{pso_vel_constrict}, and there is no need to bound particle velocities. Additionally, Clerc et al. performed a variety of experiments on test functions which showed that the constricted PSO alleviated the issues of premature convergence. 
+
+Despite this improvement, constricted PSO still has some issues with convergence. Moreover, like many PSO algorithms in literature, its dynamics are governed by a host of parameters that the user most choose, or tune. In order to address these issues, Beheshti et al. proposed a variant of PSO called the Nonparametric Particle Swarm Optimization (NP-PSO). \textbf{Cite NP-PSO Paper} The NP-PSO proposes three main changes. First, the standard PSO velocity update, \ref{pso_vel}, is changed to
+\begin{equation} \label{pso_vel_nppso}
+    \begin{aligned}
+    v_{i,j}(k+1) &= v_{i,j}(k) + r_{1,j}((\mathbf{x}_{i,Best}(k))_j - x_{i,j}(k)) + r_{2,j} ((\mathbf{x}_{i,lBest}(k))_{i,j} - x_{i,j}(k)). \\ 
+    &i=1,...,m \quad j=1,...,n
+    \end{aligned}
+\end{equation}
+Recalling that $\mathbf{x}_{i,Best}$ is the best solution that particle $i$ has seen in it's history, and defining a neighborhood of size $2l$ of these as $({x}_{i-l,Best},...{x}_{i-1,Best},{x}_{i,Best},{x}_{i+1,Best},...{x}_{i-l,Best})$, $\mathbf{x}_{i,lBest}$ is the best of these particles. Additionally, the update equation, \ref{pso_vel_nppso}, removes the tuneable parameters $w$, $c_1$, and $c_2$. 
+Second, the standard PSO position update, \ref{pso_pos}, becomes
+\begin{equation} \label{pso_pos_nppso}
+    x_{i,j}(k+1) = x_{i,j}(k) + \mathbf{x}_{i,j}(k) + r_3 ((\mathbf{x}_{Best}(k))_{i,j} - x_{i,j}(k))
+\end{equation}
+where $r_3$ is uniformly distributed similarly to $r_1$ and $r_2$. This incorporates knowledge of the best solution found by the entire particle swarm into a particle's motion in solution space. Finally, the global best particle, $x_{Best}$, is updated differently at each iteration. The process of updating $\mathbf{x}_{Best}$ starts by randomly selecting two particles in the swarm, $(\mathbf{x}_J \textrm{ and } \mathbf{x}_K$, where we require that $\mathbf{x}_J \neq \mathbf{x}_K \neq \mathbf{x}_{Best}$. Two new particles, $\mathbf{x}_1'$ and $\mathbf{x}_2'
+$, are introduced to the system using the following quadratic interpolations,
+\begin{align} \label{nppso_interpolations}
+    \mathbf{x}_1' &= \frac{1}{2} \frac{(\mathbf{x}_J^2 - \mathbf{x}_{Best}^2 - \mathbf{x}_K^2) \times y(\mathbf{x}_J) \times y(\mathbf{x}_K)}{(\mathbf{x}_J - \mathbf{x}_K) \times y(\mathbf{x}_{Best}) + (\mathbf{x}_K - \mathbf{x}_{Best}) \times y(\mathbf{x}_J) + (\mathbf{x}_{Best} - \mathbf{x}_J) \times y(\mathbf{x}_K)} \label{nppso_interp_1}\\ \nonumber\\
+    \mathbf{x}_2' &= \frac{1}{2} \frac{(\mathbf{x}_J^2 - \mathbf{x}_K^2) \times y(\mathbf{x}_{Best}) + (\mathbf{x}_K^2 - \mathbf{x}_{Best}^2) \times y(\mathbf{x}_J) + (\mathbf{x}_{Best}^2 - \mathfb{x}_J^2) \times y(\mathbf{x}_K)}{(\mathbf{x}_J - \mathbf{x}_K) \times y(\mathbf{x}_{Best}) + (\mathbf{x}_K - \mathbf{x}_{Best}) \times y(\mathbf{x}_J) + (\mathbf{x}_{Best} - \mathbf{x}_J) \times y(\mathbf{x}_K)}  \label{nppso_interp_2}
+\end{align}
+These interpolations artificially expand the amount of solution space that our particle swarm is able to explore. We note that we have overloaded notation in equations \ref{nppso_interp_1} and \ref{nppso_interp_2}, and that the interpolation is performed separately on each element of the vectors. Subsequently, $\mathbf{x}_{Best}$ is first compared to $\mathbf{x}_1'$, and, if $\mathbf{x}_1'$ is more fit than $\mathbf{x}_{Best}$, $\mathbf{x}_{Best}$ is assigned to be $\mathbf{x}_1'$. The full NP-PSO algorithm is sketched out in \ref{nppso_algorithm}. We make an important point of clarification, during the step in which we sample new particles, $\mathbf{x}_J$ and $\mathbf{x}_K$. In order to meet the condition that $\mathbf{x}_J \neq \mathbf{x}_K \neq \mathbf{x}_{Best}$, we require that no elements of the vectors are equal. If it is the case that they are, we re-sample $\mathbf{x}_J$ and $\mathbf{x}_K$ for a maximum of $n_{samples}$ iterations. Behesti et al. tested NP-PSO on nineteen unimodal and  multimodal, and found that it outperformed PSO, constricted PSO, and four other popular variants of PSO in almost every scenario. 
+
+\begin{breakablealgorithm}
+\caption{NP-PSO}
+\label{nppso_algorithm}
+\begin{algorithmic}[1]
+\Procedure{Initialize Stopping Criterion}{}
+\State Define $n_{max}$ \Comment{Maximum iterations of NP-PSO}
+\State Define $n_{samples}$ \Comment{Maximum iterations of sampling particles}
+\State Initialize $tol$  \Comment{Minimum change in best solution}
+\EndProcedure
+
+\Procedure{Initialize Particle Position and Velocities}{}
+\State Define maximum and minimum allowed velocities and positions, $\mathbf{v}_{max}$, $\mathbf{v}_{min}$, $\mathbf{x}_{max}$ and $\mathbf{x}_{min}$
+\State Randomly initialize velocities, $\mathbf{v}_i \quad i=1...m$ to zero or in the domain bounded by $\mathbf{v}_{max}$ and $\mathbf{v}_{min}$
+\State Randomly initialize solutions, $\mathbf{x}_i \quad i=1...m$ in the domain bounded by $\mathbf{x}_{max}$ and $\mathbf{x}_{min}$
+\EndProcedure
+
+\Procedure{Initialize Best particles}{}
+\State Define neighborhood size, $l$
+\State $\mathbf{x}_{Best} \leftarrow \underset{\mathbf{x}_i}{\textrm{min}}(y(\mathbf{x}_1)...y(\mathbf{x}_m))$
+\State $x_{i,Best} \leftarrow \mathbf{x}_i \quad i=1,..m$
+\State $\mathbf{x}_{i,lBest} \leftarrow \underset{\mathbf{x}}{\textrm{min}}(y(\mathbf{x}_{i-l,Best}),...,y(\mathbf{x}_{i-1,Best}),y(\mathbf{x}_{i,Best}),y(\mathbf{x}_{i+1,Best}))  \quad i=1,..m$
+\EndProcedure
+
+\Procedure{Run NP-PSO}{}
+\State $k \leftarrow 0$
+\While{$k<=n_{max} \text{ or } f_{Best}>tol$}
+    \For {$\mathbf{x}_i$ in $[\mathbf{x}_1,....\mathbf{x}_m]$}
+        \State Update each particle velocity using \ref{pso_vel_nppso}
+        \If {$v_{i,j}(k+1) > \mathbf{v}_{max}_{i,j}$ or $v_{i,j}(k+1) < \mathbf{v}_{min}_{i,j}$}
+        \State $v(k+1)_{i,j} = \textrm{max}(\textrm{min}(v(k+1)_{i,j},\mathbf{v}_{max}_{i,j}),\mathbf{v}_{min}_{i,j})$
+        \EndIf
+        \State Update each particle position using \ref{pso_nppso}
+        \If {$x_{i,j}(k+1) > \mathbf{x}_{max}_{i,j}$ or $x_{i,j}(k+1) < \mathbf{x}_{min}_{i,j}$}
+        \State Randomly reinitialize particle $i$ in the domain bounded by 
+        \EndIf
+        \If {$y(\mathbf{x}_i) < y_{i,Best}$ }
+            \State $\mathbf{x}_{i,Best} = \mathbf{x}_i$
+        \State $j \leftarrow 0$
+        \State Randomly select particles $\mathbf{x}_J$ and $\mathbf{x}_K$ from the swarm
+        \While{$j < n_{sample}_{max}$ and ($\mathbf{x}_J == \mathbf{x}_K$ or $\mathbf{x}_J == \mathbf{x}_{Best}$ or $\mathbf{x}_{Best} == \mathbf{x}_K$)}
+            \State Randomly sample particles $\mathbf{x}_J$ and $\mathbf{x}_K$ from the swarm
+            \State $j \leftarrow j+1$
+        \EndWhile
+        \If {$j < n_{samples}$}
+            \State Calculate $\mathbf{x}_1'$ using \label{nppso_interp_1}
+            \If {$y(\mathbf{x}_1') < y_{Best}$ }
+                \State $\mathbf{x}_{Best} = \mathbf{x}_1'$
+            \EndIf 
+            \State Calculate $\mathbf{x}_2'$ using \label{nppso_interp_2}
+            \If {$y(\mathbf{x}_2') < y_{Best}$ }
+                \State $\mathbf{x}_{Best} = \mathbf{x}_2'$
+            \EndIf 
+        \EndIf
+        \If {$y(\mathbf{x}_i) < y_{Best}$ }
+            \State $\mathbf{x}_{Best} = \mathbf{x}_i$
+        \EndIf 
+    \EndFor
+    $k \leftarrow k+1$
+\EndWhile
+\EndProcedure
+\end{algorithmic}
+\end{breakablealgorithm}
+
+\section{Hybrid Algorithms and Challenges to Optimization}
+We have reviewed gradient based and stochastic optimization algorithms. We have seen that, while gradient methods are very accurate when they are initialized in the vicinity of global optima, they are very prone to local minima. Additionally, the computation of a numerical gradient can be very expensive. Stochastic algorithms were subsequently developed in order to remove the necessity of computing gradients during the process of optimization, and to allow for a more thorough exploration of solution space, so that there is a higher probability of finding the global optimum. While stochastic algorithms have a better chance of converging to the region of a global optima, they can require a large amount of extraneous function evaluations. Moreover, they can result in final values that are at least slightly sub-optimal, even in the vicinity of some global optimum. 
+
+In order to address some of these issues, a variety of researchers have proposed hybrid algorithms that combine Particle Swarm Optimization and gradient based methods. Recently, Han et al. and Salajegheh et al. proposed DGPSOGS and PSOG respectively, both of which are variants of PSO that use local gradient and hessian information in it's update equations, \textbf{CITE DGPSOGS and PSOG Papers}. Additionally, Chen et al. and Plevris et al. proposed hybrid algorithms that used standard PSO, algorithm \ref{pso_algorithm}, to initially explore the solution space. \textbf{Cite HybridPSOSQR and HybridPSOConjugate} The best solution from PSO is then used to initialize gradient methods that fine tune the optimization. All of the above hybrid methods were found to be more effective than PSO alone.
+
+\section{Quantifying Uncertainty in Parameter Estimates}
+We have, to this point, formulated parameter estimation of models as a nonlinear optimization problem, reviewed multiple approaches for optimization, and presented our algorithm for performing parameter estimation. An essential part of parameter estimation is quantifying the extent to which we trust the values obtained by our parameters. Two popular methods of quantifying this uncertainty are confidence intervals, and confidence regions.
+
+Confidence intervals define the possible bounds on individual estimated parameters using equation 
+
+\begin{equation} \label{norm_conf_interval}
+    x_i \pm t_{n-p}^{1-\frac{\alpha}{2}}(s^2 c_{ii})^{\frac{1}{2}}
+\end{equation}
+
+where $n$ is the total number of data points, $p$ is the number of parameters being estimated, $t_{n-p}^{1-\frac{\alpha}{2}}$ is a t-score with $n-p$ degrees of freedom at a confidence level of $1-\alpha$, $c_{ii}$ is the variance of parameter $x_i$ which corresponds to the diagonal of parameter covariance matrix $\mathbf{C}_\mathbf{x}$, and $s = \sqrt{\frac{y(\mathbf{x}_{Best})}{n-p}}$. 
+
+Confidence regions differ, because they define joint confidence in all of the parameters simultaneously. A common approach for defining the confidence region is as a hyper-ellipse that satisfies
+
+\begin{equation} \label{norm_conf_region}
+    (\mathbf{x}-\mathbf{x}_{Best})^T \mathbf{C}_\mathbf{x}^{-1}(\mathbf{x}-\mathbf{x}_{Best}) \leq \frac{p}{n-p} y(\mathbf{x}_{Best})F_{p,n-p}^{1-\alpha}
+\end{equation}
+
+where $F_{p,n-p}^{1-\alpha}$ is the F statistic with $p$ and $n-p$ degrees of freedom, at a confidence of $1-\alpha$. The definition of confidence intervals and confidence regions given by equations \ref{norm_conf_interval} and \ref{norm_conf_region}, both assume that the parameters and experiments follow a normal distribution. While this is a valid assumption for models that are linear in estimated parameters, this is generally not valid for nonlinear models, even if the experiments are normally distributed. In order to address this issue, Beale et al. proposed the following approximation for confidence regions of nonlinear models. \textbf{Cite Beale Paper}
+
+\begin{equation} \label{nonlin_confidence_regions}
+    y(\mathbf{x}) \leq y(\mathbf{x}_{Best})\bigg(1 + \frac{p}{n-p}F_{p,n-p}^{1-\alpha}\bigg)
+\end{equation}
+
+The above approximation gives an exact result for linear models, assuming that experiments are normally distributed. More generally, equation \ref{nonlin_confidence_regions} can be written as $ y(\mathbf{x}) \leq cy(\mathbf{x}_{Best})$, where $c$ is determined based on the distribution of parameters and experiments. However, it is difficult to determine the distribution of parameters and experiments. Instead, the assumption of normality in experimental errors is made in order to define $c$ as $c=\bigg(1 + \frac{p}{n-p}F_{p,n-p}^{1-\alpha}\bigg)$. A big advantage of equation \ref{nonlin_confidence_regions} is that it does not require the confidence regions to be ellipsoids, so it allows for more accurate approximations of confidence regions in the case of nonlinear models. Despite this advantage, equation \ref{nonlin_confidence_regions} is expensive, since it requires a large amount of objective function evaluations in order to form a reasonable confidence region. 
+
+Schwaab et al. addressed this issue using Particle Swarm Optimization (PSO). \textbf{cite Schwaab nonlinear}. The number of function evaluations necessary for PSO algorithms are usually viewed as a downside. However, Schwaab et al. presented work in which they used these function evaluations to construct confidence intervals. Specifically, Schwaab et al. kept track of every function evaluation done during the process of PSO, and all the parameter values that satisfy equation \ref{nonlin_confidence_regions} are used to construct the confidence region. In their work, Schwaab et al. demonstrated the ability of this method  to create non-ellipsoid confidence regions for a variety of nonlinear models. \textbf{cite Schwaab nonlinear} In order to do so, it was necessary for them to run PSO for an extended number of iterations, and to make sure to use enough particles to thoroughly explore the solution space. \textbf{cite Schwaab nonlinear} One thing worth noting is that, using the above method, it is straight forward to create confidence regions of combinations of relevant parameters. This will allow us to find the confidence regions of physical constants. We will use this technique described here to not only quantify uncertainty in our parameter estimates, but to perform physical model selection and experimental design. 
+
+\section{x-PSO-TRF-y: Parameter Estimation, Model Selection, and Experimental Design}
+Up until this point we have reviewed a variety of methods for optimization, with a strong emphasis on PSO based methods. We also discussed a method for estimating the confidence in our optimal  We propose two hybrid algorithms, collectively called x-PSO-TRF-y, that make use of multiple variants of Particle Swarm Optimization (PSO), and can use information from all the particles in the gradient step. The x satisfies $\textrm{x} \in [\varnothing,\textrm{constrict},\textrm{NP}]$, and the y satisfies $\textrm{y} \in [1,2]$. In the scenario when y is 1, the relevant variant of PSO is run for some number of trials, and the best solution from each trial is used to initialize the TRF algorithm. When y is 2, rather than using the best solution of each swarm in each trial to initialize TRF, we run TRF using the best solution each particle has seen in it's history as an initial guess. We generally run these algorithms for a user defined number of trials, $n_{Trials}$. Every function evaluation run during the PSO phase of our  algorithm is stored, as are the final results of the TRF algorithm. Two separate confidence regions are then formed. One is formed using only the function evaluations stored during the PSO phase of our algorithms, and the other using both the function evaluations from PSO, and the results of the TRF. The outputs of this algorithm, which will be used in physical model selection and experimental design, is represented in the following plots: 
+
+\begin{enumerate}
+    \item Plot of data, and model output from most optimal parameter
+    \item Plot of data, and model outputs from all parameters in each confidence region
+    \item Histogram of fitness of particles in each confidence region
+    \item Plot of confidence regions of every pair of parameters
+    \item Plot of confidence regions of physical constants of system that are constructed by combining the parameters
+\end{enumerate}
+
+In order to use this algorithm for physical model selection, and experimental design, we run the described algorithm for the reduced models under consideration, and at different numbers of experiments and data points within the experiments. The full procedure is given by algorithm \ref{xPSOTRFy_algorithm}. 
+
+\begin{breakablealgorithm}
+\caption{x-PSO-TRF-y}
+\label{xPSOTRFy_algorithm} 
+\begin{algorithmic}[1]
+\Procedure{Initialize Experimental Conditions and confidence}{}
+\State Define $n_{Experiments}$ \Comment{Define number of experiments run for physical system}
+\State Define $n_y$  \Comment{Define number of measurements collected in each experiment}
+\State Define confidence level, $1-\alpha$
+\EndProcedure
+
+\Procedure{Initialize Algorithm and Number of Trials}{}
+\State Define $n_{Trials}$ \Comment{Define number of times PSO will be run}
+\State Select variant of x-PSO, x,$\textrm{x} \in [\varnothing,\textrm{constrict},\textrm{NP}]$ 
+\EndProcedure
+
+\For{k=1:$\textrm{n}_{\textrm{Trials}}$}
+\State Run x-PSO, and store all function evaluations, and the corresponding parameters
+\State Define the confidence regions for only PSO as all the parameters,$\mathbf{x}$, seen during x-PSO that satisfies equation \ref{nonlin_confidence_regions}
+\If{y=1}
+\State Extract best solution from x-PSO, $\mathbf{x}_{Best}$.
+\State Initialize guess for TRF as $\mathbf{x}_{Best}$, and run TRF
+\State $\mathbf{x}_{Best} \leftarrow \underset{\mathbf{x}}{min}[y(\mathbf{x}_{Best}),y(\mathbf{x}_{Best-TRF})]$
+\EndIf
+\If{y=2}
+\State Extract best solutions of each particle $\mathbf{x}_{i,Best}$ 
+\For{$\mathbf{x}_{i,Best}$ in [$\mathbf{x}_{1,Best}$,...,$\mathbf{x}_{m,Best}$ ]}
+\State Initialize guess for TRF as $\mathbf{x}_{i,Best}$, and run algorithm
+\State Store Solution
+\EndFor
+\State $\mathbf{x}_{Best} \leftarrow \underset{\mathbf{x}}{min}[y(\mathbf{x}_{1,Best}),y(\mathbf{x}_{1,Best-TRF}),...,y(\mathbf{x}_{m,Best}),y(\mathbf{x}_{m,Best-TRF})]$
+\EndIf
+\State Define new confidence regions that satisfies equation \ref{nonlin_confidence_regions}
+\EndFor
+\end{algorithmic}
+\end{breakablealgorithm}
+
+\section{Selecting the Reduced Comb-Drive Model of Best Fit}
+In this section, we analyze how well each of our reduced comb-drive models fits all the data, and select the simplest model that best explains the data. We do so, for the set of experiments described at the end of chapter 2. Briefly, we measure the displacement of the comb-drive actuator at concentrations of 0.1 $mM$, 0.5 $mM$, 1 $mM$, and 10 $mM$ KCl for two types of comb-drive actuators. One comb-drive actuator has 200 pairs of fingers with gaps of 2 $\mu m$, and one with 100 pairs of fingers wit gaps of 5 $\mu m$. These are done at 2 signals with magnitudes of 2 $V_{p-p}$.
+
+
+
+
